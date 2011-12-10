@@ -127,10 +127,10 @@ class ActsAsArchive
           klass.acts_as_archive(:class => self, :archive => true)
         
           self.reflect_on_all_associations.each do |association|
-            if association.options[:dependent] && !ActsAsArchive.find(association.klass).empty?
+            if association.options[:dependent] && !association.options[:polymorphic] && !ActsAsArchive.find(association.klass).empty?
               opts = association.options.dup
               opts[:class_name] = "::#{association.class_name}::Archive"
-              opts[:foreign_key] = association.primary_key_name
+              opts[:foreign_key] = association.respond_to?(:foreign_key) ? association.foreign_key : association.primary_key_name
               klass.send association.macro, association.name, opts
             end
           end
@@ -203,11 +203,17 @@ class ActsAsArchive
     end
     
     module InstanceMethods
-      def delete_with_archive(arel, name = nil, binds = [])
+      def delete_with_archive(arel, name, binds)
         @mutex ||= Mutex.new
         @mutex.synchronize do
           unless ActsAsArchive.disabled
-            sql = binds.inject(to_sql(arel)) {|a,e| a.sub(/\$\d+/,quote(e[1]))}
+            sql = to_sql(arel)
+            
+            # Put the id into place.
+            # Line pulled from ActiveRecord::ConnectionAdapters::Mysql2Adapter.
+            # May not be compatible with other datastores.
+            sql =  sql.gsub("\0") { quote(*(binds.dup).shift.reverse) }
+            
             from, where = /DELETE FROM (.+)/i.match(sql)[1].split(/\s+WHERE\s+/i, 2)
             from = from.strip.gsub(/[`"]/, '').split(/\s*,\s*/)
         
